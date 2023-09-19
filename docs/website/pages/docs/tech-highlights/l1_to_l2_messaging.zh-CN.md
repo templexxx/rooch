@@ -2,49 +2,44 @@
 
 ## 概述
 
-L1 至 L2 的消息传递由 L1 触发的 L2 交易实现。（资产转移基于此机制实现）
+L1 至 L2 的消息传递由 L1 触发的 L2 交易实现。（资产转移基于此机制）
 
-Rooch 具备多链资产结算的能力，对于每一条 L1 来说，其 L1 to L2 流程一致（注：合约名及其参数受不同智能合约语言影响略有不同）。都是从 L1
-的消息开始经过层层封装传递到 L2 对应的合约之中进行消费：
+Rooch 具备多链资产结算的能力，对于每一条 L1 来说，其 L1 to L2 流程一致（注：合约名及其参数受不同智能合约语言影响在 L1 上略有不同），都是由 Rooch 上的轻节点验证来自 L1 的事件后执行 L2 交易：
 
-<img alt="L1 to L2 Messaging" height="405" src="../../../public/docs/l1tol2.jpeg" width="800"/>
-
-我们需要保证来自 L1 的消息能够 `rooch_node` 正确的解析并中继给相应的合约，从协议栈的角度来看：
-
-<img alt="Rooch L1ToL2 Protocol Stack" height="203" src="../../../public/docs/l1tol2_stack.jpeg" width="500"/>
+<img alt="L1 to L2 Messaging" height="400" src="../../../public/docs/l1tol2.jpeg" width="800"/>
 
 ## L1
 
-1. 用户通过调用 `l1_stub` 中的 `call_remote` 函发起 `L1ToL2` 请求，所需参数包括:
-   1. `target`: L2 合约地址
-   2. `msg`: L2 tx 的 calldata 
-   3. `min_gas_amount`: L2 上允许使用的最小 gas 数量，即对调用 `target` 的估计值。
-   考虑到 L2 需要在调用 `target` 之前的处理开销，实际开销肯定会超过这个值。详见 [Gas Fees](#gas-fees)。
+L1 需要对 L2 的调用生成相关事件，事件中包含了 L2 调用所需的所有信息以及发生在 L1 上的过程信息，这些信息将会被 `rooch_node` 解析并中继给 L2。
+
+1. 用户通过调用 `l1_stub` 中的 `call_remote` 函数发起 L1 to L2 请求，所需参数包括:
+   1. `action`: 编码后的 Rooch MoveAction 
+   2. `min_gas_amount`: L2 上允许使用的最小 gas 数量，即对调用 `action` 的估计值。
+   考虑到 L2 需要在调用 `action` 之前的处理开销，实际开销肯定会超过这个值。详见 [Gas Fees](#gas-fees)。
 
    `l1_stub` 提供了较为友好的接口，调用者只需关心 L2 调用信息而无需关注信息封装和传递。
 
-2. `l1_stub` 将调用 `rooch_transport` 的 `send_l1_to_l2` 函数，
-   `rooch_transport` 为 L1 与 L2 通信的底层合约。`send_l1_to_l2` 参数包括：
-   1. `to`: 对应的 L2 Stub 合约地址。在这个场景中为 `l2_stub` 合约地址
-   2. `gas_amount`: 基于 `min_gas_amount` 以及 `msg` 尺寸估算得到的 L2 上的基础 gas 开销
-   3. `data`: `relay_msg_data` 编码后数据 (`msg_sequence` `msg_sender` `target` `msg` `min_gas_amount` 等必要信息)
+2. `l1_stub` 将调用 `rooch_transport` 的 `send_l1_to_l2` 函数完成 L1 上的事件记录和 gas 燃烧，参数包括：
+   1. `msg_sequence`
+   2. `msg_sender`
+   3. `action` 
+   4. `min_gas_amount`
 
 3. `send_l1_to_l2` 在完成检查后，发出 `L1ToL2Event` 事件，其中包括：
-   1. `from`: 发起 `send_l1_to_l2` 的 L1 账户地址/合约别名。在这里是 `l1_stub`
-   2. `to`: `l2_stub` 合约地址
-   3. `L1ToL2Event_version`: event 版本号
-   4. `event_data`: 在 `relay_msg_data` 基础上增加了 `gas_amount` 字段
+   1. `msg_sequence`
+   2. `msg_sender`
+   3. `action`
+   4. `min_gas_amount`
+   5. `from`: 发起 `send_l1_to_l2` 的 L1 账户地址/合约别名。在这里是 `l1_stub`。
+   6. `gas_amount`: 基于 `min_gas_amount` 以及根据 `action` 尺寸估算得到的 L2 上的基础 gas 开销。也是 L1 上燃烧的 gas 数量主要依据。
+   7. `L1ToL2Event_version`: event 版本号
 
 ## L2
 
-1. `rooch_node` 监听 `L1ToL2Event` 事件，解析其中的参数，并封装为 `l1_to_l2_tx`
-2. 将 ` l1_to_l2_tx` 传递给 `l2_stub` 的 `relay_message` 函数，参数包括：
-   1. `sequence`: 中继消息序列号
-   2. `sender`: 消息发送方
-   3. `target`: L2 合约地址
-   4. `min_gas_amount`: L2 上允许使用的最小 gas 数量，即对调用 `target` 的估计值。
-   5. `msg`: L2 tx 的 calldata 
-3. `relay_message` 在完成检查后，调用 `target` 合约
+1. `rooch_node` 监听 `L1ToL2Event` 事件，解析其中的参数，生成 L1 事件包含证明（证明该事件在 L1 上发生），最终封装为 L2 tx
+2. 将 L2 tx 传递给 executor 验证 L1 事件包含证明，验证成功后执行 `action` 
+
+<img alt="L1 to L2 Messaging L2 Process" height="406" src="../../../public/docs/l1tol2_l2_process.jpeg" width="700"/>
 
 ## Gas Fees
 
@@ -58,7 +53,8 @@ Gas Fee 分为两个部分：
 
 <img alt="Rooch L1ToL2 Gas Fee" height="450" src="../../../public/docs/l1tol2_gas_fee.jpeg" width="500"/>
 
-这就像是一个 Gas 变速装置，对于不同的链来说，我们只要替换 L1 的变速齿轮（调整 L2:L1 gas 比例）即可。
+这就像是一个 Gas 变速装置，对于不同的链来说，我们只要替换 L1 的变速齿轮（调整 L2:L1 gas 比例）自动实现 L1 上的燃烧。这样无论是哪一条 L1, 使用者仅需要关注 L2
+上目标函数的开销即可，无需关注复杂的 gas 定价。
 
 燃烧将以在 L1 中以 `while loop` 形式实现，伪代码如下：
     
@@ -69,14 +65,12 @@ Gas Fee 分为两个部分：
     }
     ```
 
-## 重放消息
+## 安全性
 
-在极端情况下，一条合法的 L1ToL2 交易可能会在 Rooch 上失败：
+Rooch 的 L1 to L2 消息机制保障的是 L1 上的合约调用能够被正确的中继到 L2 上，L2 上的合约自行负责对 L1 的调用者的检查，这要求
+将相关的 `sender` 等信息作为参数封装进 `l1_stub.call_remote` 中的 `action`。
 
-1. Rooch 服务不可用
-2. 过低的 `gas_amount`
 
-此时，用户可以通过重放消息的方式重新提交交易，重放消息所需要的接口正在设计之中，敬请期待。
 
 
 
