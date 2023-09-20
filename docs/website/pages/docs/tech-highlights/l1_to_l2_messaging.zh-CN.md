@@ -36,10 +36,11 @@ L1 需要对 L2 的调用生成相关事件，事件中包含了 L2 调用所需
 
 ## L2
 
-1. `rooch_node` 监听 `L1ToL2Event` 事件，解析其中的参数，生成 L1 事件包含证明（证明该事件在 L1 上发生），最终封装为 L2 tx
-2. 将 L2 tx 传递给 executor 验证 L1 事件包含证明，验证成功后执行 `action` 
+1. `rooch_node` 监听 `L1ToL2Event` 事件，解析其中的参数，生成 L1 事件存在证明（证明该事件在 L1 上发生），最终封装为 L2 tx
+2. 将 L2 tx 传递给 executor 验证 L1 事件包含证明，executor 将使用 L1 对应的轻节点合约验证事件的存在证明。
+3. 验证成功后执行 `action` 
 
-<img alt="L1 to L2 Messaging L2 Process" height="406" src="../../../public/docs/l1tol2_l2_process.jpeg" width="700"/>
+<img alt="L1 to L2 Messaging L2 Process" height="391" src="../../../public/docs/l1tol2_l2_process.jpeg" width="700"/>
 
 ## Gas Fees
 
