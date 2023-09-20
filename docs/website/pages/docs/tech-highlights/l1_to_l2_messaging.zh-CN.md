@@ -30,7 +30,7 @@ L1 需要对 L2 的调用生成相关事件，事件中包含了 L2 调用所需
    2. `msg_sender`
    3. `action`
    4. `min_gas_amount`
-   5. `from`: 发起 `send_l1_to_l2` 的 L1 账户地址/合约别名。在这里是 `l1_stub`。
+   5. `from`: `send_l1_to_l2` 的发起者。在这里是 `l1_stub`。
    6. `gas_amount`: 基于 `min_gas_amount` 以及根据 `action` 尺寸估算得到的 L2 上的基础 gas 开销。也是 L1 上燃烧的 gas 数量主要依据。
    7. `L1ToL2Event_version`: event 版本号
 
